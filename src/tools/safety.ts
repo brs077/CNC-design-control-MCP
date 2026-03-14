@@ -50,4 +50,19 @@ export function registerSafetyTools(server: McpServer): void {
       }
     }
   );
+
+  // jog_cancel — cancel in-progress jog without alarm
+  server.tool(
+    "jog_cancel",
+    "Cancel an in-progress jog. Stops motion with controlled deceleration without triggering alarm state.",
+    {},
+    async () => {
+      try {
+        client.jogCancel();
+        return text("Jog cancel sent (0x85). Machine will decelerate to a stop.");
+      } catch (e: any) {
+        return err("Jog cancel failed: " + e.message);
+      }
+    }
+  );
 }

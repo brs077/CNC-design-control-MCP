@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { client } from "../cncjs-client.js";
-import { GRBL_SETTINGS_MAP, GRBL_ALARMS } from "../types.js";
+import { GRBL_SETTINGS_MAP, GRBL_ALARMS, GRBL_ERRORS } from "../types.js";
 
 function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };
@@ -256,6 +256,42 @@ export function registerQueryTools(server: McpServer): void {
         alarmCode: code,
         meaning: code !== null ? (GRBL_ALARMS[code] || "Unknown alarm code") : "Alarm state with unknown code",
         resolution: "Use unlock_machine ($X) to clear, or home_machine ($H) if position is lost.",
+      });
+    }
+  );
+  // 15. get_console_output
+  server.tool(
+    "get_console_output",
+    "Get recent serial console output (GRBL responses, errors, probe results, sent commands)",
+    {
+      lines: z
+        .number()
+        .min(1)
+        .max(200)
+        .default(50)
+        .describe("Number of recent lines to return (default 50)"),
+    },
+    async ({ lines }) => {
+      const buffer = client.consoleOutput;
+      if (buffer.length === 0) return text("No console output captured yet.");
+      const recent = buffer.slice(-lines);
+      return text(recent.join("\n"));
+    }
+  );
+
+  // 16. get_error_info
+  server.tool(
+    "get_error_info",
+    "Get last GRBL error code and human-readable meaning",
+    {},
+    async () => {
+      const code = client.lastErrorCode;
+      if (code === null) {
+        return text("No GRBL error recorded.");
+      }
+      return json({
+        errorCode: code,
+        meaning: GRBL_ERRORS[code] || "Unknown error code",
       });
     }
   );
