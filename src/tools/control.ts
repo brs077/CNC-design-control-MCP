@@ -255,4 +255,169 @@ export function registerControlTools(server: McpServer): void {
       }
     }
   );
+
+  // set_work_zero
+  server.tool(
+    "set_work_zero",
+    "Set the work coordinate origin — zeros selected axes at the current position. HIGH RISK — affects all subsequent motion.",
+    {
+      axes: z
+        .array(z.enum(["X", "Y", "Z"]))
+        .min(1)
+        .describe("Axes to zero at current position (e.g., ['X','Y'] or ['Z'])"),
+      wcs: z
+        .enum(["G54", "G55", "G56", "G57", "G58", "G59"])
+        .default("G54")
+        .describe("Work coordinate system (default G54)"),
+    },
+    async ({ axes, wcs }) => {
+      try {
+        client.ensurePortOpen();
+        const state = client.activeState;
+        if (state !== "Idle") {
+          return err(`Cannot set work zero — machine is in ${state} state. Must be Idle.`);
+        }
+
+        const wcsMap: Record<string, number> = {
+          G54: 1, G55: 2, G56: 3, G57: 4, G58: 5, G59: 6,
+        };
+        const pNum = wcsMap[wcs];
+        const axisWords = axes.map((a) => `${a}0`).join(" ");
+        const cmd = `G10 L20 P${pNum} ${axisWords}`;
+
+        client.sendGcode(cmd);
+        return text(`Work zero set: ${axes.join(", ")} zeroed in ${wcs} (${cmd})`);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
+
+  // spindle_control
+  server.tool(
+    "spindle_control",
+    "Turn spindle on (CW or CCW with speed) or off. HIGH RISK — rotating tool.",
+    {
+      action: z.enum(["cw", "ccw", "off"]).describe("Spindle action: cw (M3), ccw (M4), or off (M5)"),
+      speed: z.number().positive().optional().describe("Spindle speed in RPM (required for cw/ccw)"),
+    },
+    async ({ action, speed }) => {
+      try {
+        client.ensurePortOpen();
+        if ((action === "cw" || action === "ccw") && !speed) {
+          return err("Spindle speed (RPM) is required when turning spindle on.");
+        }
+
+        let cmd: string;
+        if (action === "cw") {
+          cmd = `M3 S${speed}`;
+        } else if (action === "ccw") {
+          cmd = `M4 S${speed}`;
+        } else {
+          cmd = "M5";
+        }
+
+        client.sendGcode(cmd);
+        if (action === "off") {
+          return text("Spindle stopped (M5).");
+        }
+        return text(`Spindle ${action.toUpperCase()} at ${speed} RPM (${cmd}).`);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
+
+  // coolant_control
+  server.tool(
+    "coolant_control",
+    "Turn coolant on (mist or flood) or off.",
+    {
+      action: z.enum(["mist", "flood", "off"]).describe("Coolant action: mist (M7), flood (M8), or off (M9)"),
+    },
+    async ({ action }) => {
+      try {
+        client.ensurePortOpen();
+        const cmdMap: Record<string, string> = { mist: "M7", flood: "M8", off: "M9" };
+        const cmd = cmdMap[action];
+        client.sendGcode(cmd);
+        return text(`Coolant ${action} (${cmd}).`);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
+
+  // probe_z
+  server.tool(
+    "probe_z",
+    "Probe Z-axis height using a touch plate. Sends G38.2 probe command downward. HIGH RISK — causes downward motion.",
+    {
+      touchPlateThickness: z.number().positive().describe("Touch plate thickness in mm"),
+      feedrate: z.number().positive().default(100).describe("Probe feedrate in mm/min (default 100)"),
+      maxDistance: z.number().positive().default(50).describe("Max probe distance downward in mm (default 50)"),
+      retract: z.number().positive().default(2).describe("Retract distance after probe in mm (default 2)"),
+      setZero: z.boolean().default(true).describe("Automatically set Z work zero accounting for plate thickness (default true)"),
+    },
+    async ({ touchPlateThickness, feedrate, maxDistance, retract, setZero }) => {
+      try {
+        client.ensurePortOpen();
+        const state = client.activeState;
+        if (state !== "Idle") {
+          return err(`Cannot probe — machine is in ${state} state. Must be Idle.`);
+        }
+
+        // Send probe command
+        const probeCmd = `G38.2 Z-${maxDistance} F${feedrate}`;
+        client.sendGcode(probeCmd);
+
+        // Wait for probe result
+        const result = await client.waitForProbeResult(30000);
+
+        if (!result.success) {
+          return err(
+            `Probe failed — no contact detected within ${maxDistance}mm.\n` +
+            "Check that the touch plate is connected and the probe circuit is working.\n" +
+            "Machine may be in alarm state — use get_alarm_info to check."
+          );
+        }
+
+        let msg = `Probe contact at Z=${result.position.z.toFixed(3)}mm (machine coordinates).`;
+
+        if (setZero) {
+          // Set Z zero accounting for touch plate thickness
+          const zeroCmd = `G10 L20 P1 Z${touchPlateThickness}`;
+          client.sendGcode(zeroCmd);
+          // Retract
+          client.sendGcode(`G0 Z${retract}`);
+          msg += `\nZ work zero set with ${touchPlateThickness}mm plate thickness (${zeroCmd}).`;
+          msg += `\nRetracted to Z=${retract}mm above work zero.`;
+        }
+
+        return text(msg);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
+
+  // set_wcs
+  server.tool(
+    "set_wcs",
+    "Switch the active work coordinate system (G54-G59)",
+    {
+      wcs: z
+        .enum(["G54", "G55", "G56", "G57", "G58", "G59"])
+        .describe("Work coordinate system to activate"),
+    },
+    async ({ wcs }) => {
+      try {
+        client.ensurePortOpen();
+        client.sendGcode(wcs);
+        return text(`Active work coordinate system switched to ${wcs}.`);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
 }

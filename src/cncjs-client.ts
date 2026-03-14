@@ -78,8 +78,17 @@ export class CNCjsClient {
   private _gcodeFile: string | null = null;
   private _gcodeContent: string | null = null;
 
-  // Alarm
+  // Alarm & errors
   private _alarmCode: number | null = null;
+  private _lastErrorCode: number | null = null;
+
+  // Console ring buffer
+  private static readonly CONSOLE_BUFFER_SIZE = 200;
+  private _consoleBuffer: string[] = [];
+
+  // Probe result
+  private _lastProbeResult: { success: boolean; position: Position } | null = null;
+  private _probeResolve: ((result: { success: boolean; position: Position }) => void) | null = null;
 
   // Lists (fetched on demand)
   private _macros: MacroRecord[] = [];
@@ -238,11 +247,59 @@ export class CNCjsClient {
       console.error(`[cncjs-mcp] Serial port error: ${JSON.stringify(data)}`);
     });
 
-    // Alarm (from serialport:read parsing)
+    // Serial data parsing (alarms, errors, probes, console buffer)
     this.socket.on("serialport:read", (data: string) => {
-      const alarmMatch = data?.match?.(/ALARM:(\d+)/);
+      if (!data) return;
+
+      // Add to console ring buffer
+      const lines = data.split("\n").filter((l: string) => l.trim());
+      for (const line of lines) {
+        this._consoleBuffer.push(line);
+        if (this._consoleBuffer.length > CNCjsClient.CONSOLE_BUFFER_SIZE) {
+          this._consoleBuffer.shift();
+        }
+      }
+
+      // Alarm parsing
+      const alarmMatch = data.match(/ALARM:(\d+)/);
       if (alarmMatch) {
         this._alarmCode = parseInt(alarmMatch[1], 10);
+      }
+
+      // Error parsing
+      const errorMatch = data.match(/error:(\d+)/);
+      if (errorMatch) {
+        this._lastErrorCode = parseInt(errorMatch[1], 10);
+      }
+
+      // Probe result parsing: [PRB:x.xxx,y.yyy,z.zzz:1] or [PRB:x.xxx,y.yyy,z.zzz:0]
+      const probeMatch = data.match(/\[PRB:([-\d.]+),([-\d.]+),([-\d.]+):([01])\]/);
+      if (probeMatch) {
+        const result = {
+          success: probeMatch[4] === "1",
+          position: {
+            x: parseFloat(probeMatch[1]),
+            y: parseFloat(probeMatch[2]),
+            z: parseFloat(probeMatch[3]),
+          },
+        };
+        this._lastProbeResult = result;
+        if (this._probeResolve) {
+          this._probeResolve(result);
+          this._probeResolve = null;
+        }
+      }
+    });
+
+    // Capture outgoing commands to console buffer
+    this.socket.on("serialport:write", (data: string) => {
+      if (!data) return;
+      const lines = data.split("\n").filter((l: string) => l.trim());
+      for (const line of lines) {
+        this._consoleBuffer.push(`> ${line}`);
+        if (this._consoleBuffer.length > CNCjsClient.CONSOLE_BUFFER_SIZE) {
+          this._consoleBuffer.shift();
+        }
       }
     });
   }
@@ -257,6 +314,10 @@ export class CNCjsClient {
     this._gcodeFile = null;
     this._gcodeContent = null;
     this._alarmCode = null;
+    this._lastErrorCode = null;
+    this._consoleBuffer = [];
+    this._lastProbeResult = null;
+    this._probeResolve = null;
   }
 
   // ── Getters (cached, no round-trip) ─────────────────────────
@@ -303,6 +364,32 @@ export class CNCjsClient {
 
   get activeState(): string {
     return this._status.activeState;
+  }
+
+  get lastErrorCode(): number | null {
+    return this._lastErrorCode;
+  }
+
+  get consoleOutput(): string[] {
+    return [...this._consoleBuffer];
+  }
+
+  get lastProbeResult(): { success: boolean; position: Position } | null {
+    return this._lastProbeResult;
+  }
+
+  waitForProbeResult(timeoutMs: number = 30000): Promise<{ success: boolean; position: Position }> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this._probeResolve = null;
+        reject(new Error("Probe timeout — no probe contact detected within timeout period."));
+      }, timeoutMs);
+
+      this._probeResolve = (result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      };
+    });
   }
 
   // ── Port Operations ─────────────────────────────────────────
@@ -436,6 +523,11 @@ export class CNCjsClient {
   // Emergency stop (soft reset)
   emergencyStop(): void {
     this.writeRaw("\x18");
+  }
+
+  // Jog cancel (realtime command)
+  jogCancel(): void {
+    this.writeRaw("\x85");
   }
 
   // Jog
