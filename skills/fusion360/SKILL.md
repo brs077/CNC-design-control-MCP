@@ -1,31 +1,40 @@
 ---
 name: fusion360
-description: Generate Fusion 360 Python API scripts for parametric CAD modeling and CAM toolpath generation. Use when the user wants to create Fusion 360 models, generate CAM toolpaths, or automate Fusion 360 workflows.
+description: Generate Fusion 360 Python API scripts for parametric 3D modeling and CAM. Use when the user wants to create 3D models, assemblies, or CAM toolpaths in Autodesk Fusion 360.
 ---
 
 # Fusion 360 Integration
 
-Generate Python scripts for the Fusion 360 API to automate CAD modeling and CAM operations.
+Generate Python scripts for the Fusion 360 API to create parametric 3D models and CAM operations.
 
-## Available Tools
+## Available MCP Tools
 
-- **generate_fusion_script** — Generate a Fusion 360 Python API script for:
-  - Parametric 3D modeling (sketches, extrusions, revolves, fillets, chamfers)
-  - CAM setup and toolpath generation
-  - Design automation and batch operations
-  - Parameters: description, scriptType (model/cam/utility), features, outputPath
-- **list_fusion_scripts** — List previously generated Fusion 360 scripts in the output directory
+- `generate_fusion_script` — Generate a Python script for Fusion 360's API. Supports:
+  - 3D sketches, extrusions, revolutions, sweeps, lofts
+  - Parametric dimensions and constraints
+  - Multi-body modeling and assemblies
+  - CAM setup with toolpaths (adaptive, pocket, contour, drilling)
+  - Material assignment and appearance
+- `list_fusion_scripts` — List previously generated Fusion 360 scripts with metadata
+
+## Script Execution
+
+Generated scripts run inside Fusion 360:
+1. Open Fusion 360
+2. Go to **Scripts and Add-Ins** > **Scripts** > **Run**
+3. Select the generated `.py` file
+4. The script creates the model/toolpath automatically
 
 ## Workflow
 
-1. Discuss what the user wants to create in Fusion 360
-2. Generate the script with appropriate features and parameters
-3. User runs the script in Fusion 360: Scripts and Add-Ins > Scripts > Run
-4. Optionally generate CAM toolpaths and post-process to G-code
+1. Discuss the 3D part requirements with the user
+2. Generate the Fusion 360 script with appropriate geometry and parameters
+3. User runs the script in Fusion 360
+4. For CAM: configure tool library and post-processor in Fusion 360
+5. Post-process to G-code and use `load_gcode` to send to the machine
 
-## Notes
+## Tips
 
-- Scripts are generated as Python files for the Fusion 360 API
-- Users must have Fusion 360 installed to run generated scripts
-- Scripts use `adsk.core` and `adsk.fusion` modules
-- CAM scripts can generate toolpaths that export to G-code for this CNC setup
+- Scripts use the Fusion 360 Python API (`adsk.core`, `adsk.fusion`)
+- Include error handling and user feedback in generated scripts
+- Use parametric dimensions so users can easily modify the design
