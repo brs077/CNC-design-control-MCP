@@ -8,7 +8,7 @@ MCP server for CNC design, CAM generation, and GRBL machine control (FoxAlien XE
 Claude Code ←stdio/MCP→ CNC-design-control-MCP (Node.js) ←Socket.IO v1→ CNCjs :8000 ←USB Serial→ GRBL
 ```
 
-## Tools (56 total)
+## Tools (64 total)
 
 ### Read-Only / Query (17)
 `list_serial_ports`, `get_connection_status`, `get_machine_state`, `get_machine_position`, `get_work_coordinate_offset`, `get_machine_settings`, `get_parser_state`, `get_loaded_gcode`, `get_job_progress`, `get_workflow_state`, `get_feeder_status`, `list_macros`, `list_machines`, `get_alarm_info`, `get_console_output`, `get_error_info`, `analyze_gcode`
@@ -53,6 +53,16 @@ Claude Code ←stdio/MCP→ CNC-design-control-MCP (Node.js) ←Socket.IO v1→ 
 `package_design` — bundle designs into marketplace-ready packages (multi-format files, preview images, README, listing metadata, zip archive)
 `generate_listing_description` — generate SEO-optimized listing descriptions for Etsy, Cults3D, or Gumroad
 `convert_design_format` — convert between formats (SVG↔DXF, G-code→SVG preview)
+
+### Carpentry & Joinery (8)
+`generate_dado` — cut a rectangular groove/channel for shelves, dividers, and panel joinery
+`generate_rabbet` — L-shaped step cut along a workpiece edge for back panels and lap joints
+`generate_mortise` — rectangular pocket for mortise-and-tenon joinery
+`generate_tenon` — cut a tenon by removing cheek material from both faces of a workpiece end
+`generate_box_joint` — evenly spaced interlocking finger joints for strong corner joints (piece A/B)
+`generate_dovetail_pins` — dovetail pin board waste removal with angled cuts
+`generate_shelf_pin_holes` — two-column hole patterns for adjustable shelving (32mm system)
+`generate_inlay_pocket` — precisely sized shallow recess for inlaying contrasting material
 
 ## Windows PC Setup for CNCjs
 
