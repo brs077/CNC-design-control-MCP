@@ -3,6 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { client } from "../cncjs-client.js";
+import { writeFileSync } from "fs";
 
 function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };
@@ -620,6 +621,427 @@ export function registerCarpentryTools(server: McpServer): void {
         };
 
         return json(result);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
+
+  // ── generate_cut_list ──────────────────────────────────
+
+  server.tool(
+    "generate_cut_list",
+    "Generate a detailed, formatted cut list for a woodworking project. Groups parts by thickness/material, includes grain direction and edge banding notes, and outputs a printable text or CSV file for the shop.",
+    {
+      projectName: z.string().describe("Name of the project (e.g., 'Kitchen Wall Cabinet')"),
+      parts: z.array(z.object({
+        name: z.string().describe("Part name (e.g., 'Side panel')"),
+        length: z.number().positive().describe("Part length — along the grain (mm)"),
+        width: z.number().positive().describe("Part width — across the grain (mm)"),
+        thickness: z.number().positive().describe("Part thickness (mm)"),
+        quantity: z.number().int().positive().default(1).describe("Number needed"),
+        material: z.string().default("plywood").describe("Material (e.g., 'plywood', 'oak', 'pine', 'mdf')"),
+        grainDirection: z.enum(["length", "width", "none"]).default("length").describe("Primary grain direction: 'length' (along L), 'width' (along W), or 'none' (MDF/plywood)"),
+        edgeBanding: z.array(z.enum(["length1", "length2", "width1", "width2"])).default([]).describe("Which edges need banding: length1, length2 (long edges), width1, width2 (short edges)"),
+        notes: z.string().optional().describe("Additional notes (e.g., 'miter left end 45°', 'drill shelf pin holes')"),
+      })).describe("List of parts"),
+      outputPath: z.string().optional().describe("File path to save the cut list (supports .txt or .csv)"),
+      format: z.enum(["text", "csv"]).default("text").describe("Output format: 'text' for printable shop list, 'csv' for spreadsheet import"),
+    },
+    async (params: any) => {
+      try {
+        const { projectName, parts, outputPath, format } = params;
+
+        // Group parts by material and thickness
+        const groups = new Map<string, typeof parts>();
+        for (const part of parts) {
+          const key = `${part.material} ${part.thickness}mm`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key)!.push(part);
+        }
+
+        let output: string;
+
+        if (format === "csv") {
+          const lines: string[] = [
+            "Group,Part Name,Qty,Length (mm),Width (mm),Thickness (mm),Material,Grain,Edge Banding,Notes"
+          ];
+          for (const [group, groupParts] of groups) {
+            for (const p of groupParts) {
+              const eb = p.edgeBanding.length > 0 ? p.edgeBanding.join("+") : "-";
+              const notes = p.notes ? `"${p.notes}"` : "";
+              lines.push(`"${group}","${p.name}",${p.quantity},${p.length},${p.width},${p.thickness},"${p.material}","${p.grainDirection}","${eb}",${notes}`);
+            }
+          }
+          output = lines.join("\n");
+        } else {
+          const lines: string[] = [];
+          lines.push(`CUT LIST: ${projectName}`);
+          lines.push(`${"=".repeat(70)}`);
+          lines.push(`Generated: ${new Date().toISOString().split("T")[0]}`);
+          lines.push("");
+
+          let totalParts = 0;
+          let partNumber = 1;
+
+          for (const [group, groupParts] of groups) {
+            lines.push(`── ${group.toUpperCase()} ${"─".repeat(Math.max(0, 55 - group.length))}`);
+            lines.push("");
+            lines.push(`  #   Qty  Part Name                  Length    Width     Grain   Edge Band`);
+            lines.push(`  ${"─".repeat(66)}`);
+
+            for (const p of groupParts) {
+              const eb = p.edgeBanding.length > 0 ? p.edgeBanding.join("+") : "-";
+              const grain = p.grainDirection === "none" ? "-" : p.grainDirection === "length" ? "L" : "W";
+              const name = p.name.padEnd(26).slice(0, 26);
+              lines.push(`  ${String(partNumber).padStart(2)}   ${String(p.quantity).padStart(2)}x  ${name} ${String(p.length).padStart(7)}  ${String(p.width).padStart(7)}     ${grain.padEnd(6)}  ${eb}`);
+              if (p.notes) {
+                lines.push(`                   → ${p.notes}`);
+              }
+              totalParts += p.quantity;
+              partNumber++;
+            }
+            lines.push("");
+          }
+
+          lines.push(`${"=".repeat(70)}`);
+          lines.push(`TOTAL: ${partNumber - 1} unique parts, ${totalParts} pieces`);
+          lines.push("");
+
+          // Edge banding summary
+          const bandedParts = parts.filter((p: any) => p.edgeBanding.length > 0);
+          if (bandedParts.length > 0) {
+            lines.push("EDGE BANDING REQUIRED:");
+            let totalBandingLength = 0;
+            for (const p of bandedParts) {
+              for (const edge of p.edgeBanding) {
+                const edgeLen = edge.startsWith("length") ? p.length : p.width;
+                totalBandingLength += edgeLen * p.quantity;
+              }
+            }
+            lines.push(`  Total banding length: ${(totalBandingLength / 1000).toFixed(1)}m (${Math.ceil(totalBandingLength / 1000 * 1.1)}m with 10% waste)`);
+            lines.push("");
+          }
+
+          output = lines.join("\n");
+        }
+
+        if (outputPath) {
+          writeFileSync(outputPath, output, "utf-8");
+          return text(`Cut list saved to ${outputPath}\n\n${output}`);
+        }
+        return text(output);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
+
+  // ── generate_project_schematic ──────────────────────────────
+
+  server.tool(
+    "generate_project_schematic",
+    "Generate an SVG schematic drawing for a woodworking project. Creates dimensioned part diagrams showing each piece with measurements, grain direction arrows, and joinery locations. Useful as a shop drawing or visual reference.",
+    {
+      projectName: z.string().describe("Project name for the title block"),
+      parts: z.array(z.object({
+        name: z.string().describe("Part name"),
+        length: z.number().positive().describe("Part length (mm)"),
+        width: z.number().positive().describe("Part width (mm)"),
+        thickness: z.number().positive().describe("Part thickness (mm)"),
+        features: z.array(z.object({
+          type: z.enum(["dado", "rabbet", "mortise", "hole", "chamfer"]).describe("Feature type"),
+          x: z.number().describe("Feature X position relative to part origin (mm)"),
+          y: z.number().describe("Feature Y position relative to part origin (mm)"),
+          width: z.number().positive().optional().describe("Feature width (mm)"),
+          height: z.number().positive().optional().describe("Feature height/length (mm)"),
+          diameter: z.number().positive().optional().describe("Hole diameter (mm)"),
+          depth: z.number().positive().optional().describe("Feature depth (mm)"),
+          label: z.string().optional().describe("Label text for the feature"),
+        })).default([]).describe("Joinery features to show on the part"),
+      })).describe("Parts to draw"),
+      columns: z.number().int().min(1).max(4).default(2).describe("Number of columns in the layout (default 2)"),
+      scale: z.number().positive().default(0.5).describe("Drawing scale relative to real size (default 0.5 = half size)"),
+      outputPath: z.string().describe("File path to save the SVG schematic"),
+    },
+    async (params: any) => {
+      try {
+        const { projectName, parts, columns, scale, outputPath } = params;
+
+        const padding = 30;
+        const partSpacing = 40;
+        const titleHeight = 50;
+        const dimOffset = 15; // dimension line offset from part edge
+
+        // Calculate layout
+        const scaledParts = parts.map((p: any) => ({
+          ...p,
+          sw: p.length * scale,
+          sh: p.width * scale,
+        }));
+
+        // Arrange in grid
+        const rows = Math.ceil(scaledParts.length / columns);
+        const colWidths: number[] = [];
+        const rowHeights: number[] = [];
+
+        for (let c = 0; c < columns; c++) {
+          let maxW = 0;
+          for (let r = 0; r < rows; r++) {
+            const idx = r * columns + c;
+            if (idx < scaledParts.length) maxW = Math.max(maxW, scaledParts[idx].sw);
+          }
+          colWidths.push(maxW + dimOffset * 2);
+        }
+        for (let r = 0; r < rows; r++) {
+          let maxH = 0;
+          for (let c = 0; c < columns; c++) {
+            const idx = r * columns + c;
+            if (idx < scaledParts.length) maxH = Math.max(maxH, scaledParts[idx].sh);
+          }
+          rowHeights.push(maxH + dimOffset * 2 + 30); // 30 for label text
+        }
+
+        const totalW = colWidths.reduce((a, b) => a + b, 0) + partSpacing * (columns - 1) + padding * 2;
+        const totalH = rowHeights.reduce((a, b) => a + b, 0) + partSpacing * (rows - 1) + padding * 2 + titleHeight;
+
+        let svg = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+        svg += `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}mm" height="${totalH}mm" viewBox="0 0 ${totalW} ${totalH}">\n`;
+        svg += `  <style>\n`;
+        svg += `    text { font-family: Arial, sans-serif; }\n`;
+        svg += `    .title { font-size: 14px; font-weight: bold; }\n`;
+        svg += `    .part-label { font-size: 9px; font-weight: bold; }\n`;
+        svg += `    .dim-text { font-size: 7px; }\n`;
+        svg += `    .feature-label { font-size: 6px; fill: #666; }\n`;
+        svg += `    .part-outline { fill: #fef3c7; stroke: #92400e; stroke-width: 0.5; }\n`;
+        svg += `    .feature { fill: #d1d5db; stroke: #6b7280; stroke-width: 0.3; }\n`;
+        svg += `    .dim-line { stroke: #374151; stroke-width: 0.3; marker-end: url(#arrow); marker-start: url(#arrow-start); }\n`;
+        svg += `    .grain-arrow { stroke: #92400e; stroke-width: 0.3; fill: none; stroke-dasharray: 2,2; }\n`;
+        svg += `  </style>\n`;
+        svg += `  <defs>\n`;
+        svg += `    <marker id="arrow" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto"><path d="M0,0 L6,2 L0,4" fill="#374151" /></marker>\n`;
+        svg += `    <marker id="arrow-start" markerWidth="6" markerHeight="4" refX="0" refY="2" orient="auto"><path d="M6,0 L0,2 L6,4" fill="#374151" /></marker>\n`;
+        svg += `  </defs>\n`;
+
+        // Title
+        svg += `  <text x="${totalW / 2}" y="${padding + 15}" text-anchor="middle" class="title">${projectName} — Parts Schematic</text>\n`;
+        svg += `  <line x1="${padding}" y1="${padding + 25}" x2="${totalW - padding}" y2="${padding + 25}" stroke="#374151" stroke-width="0.5" />\n`;
+
+        // Draw each part
+        let partIdx = 0;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < columns; c++) {
+            if (partIdx >= scaledParts.length) break;
+            const part = scaledParts[partIdx];
+
+            // Calculate position
+            let px = padding + dimOffset;
+            for (let cc = 0; cc < c; cc++) px += colWidths[cc] + partSpacing;
+            let py = padding + titleHeight + dimOffset;
+            for (let rr = 0; rr < r; rr++) py += rowHeights[rr] + partSpacing;
+
+            // Part rectangle
+            svg += `  <rect x="${px}" y="${py}" width="${part.sw}" height="${part.sh}" class="part-outline" />\n`;
+
+            // Part label
+            svg += `  <text x="${px + part.sw / 2}" y="${py - dimOffset - 3}" text-anchor="middle" class="part-label">${part.name} (${part.thickness}mm thick)</text>\n`;
+
+            // Grain direction arrow (dashed line with arrow along length)
+            if (part.sh > 10 && part.sw > 20) {
+              const arrowY = py + part.sh / 2;
+              svg += `  <line x1="${px + 5}" y1="${arrowY}" x2="${px + part.sw - 5}" y2="${arrowY}" class="grain-arrow" />\n`;
+              // Arrowhead
+              svg += `  <polygon points="${px + part.sw - 8},${arrowY - 2} ${px + part.sw - 5},${arrowY} ${px + part.sw - 8},${arrowY + 2}" fill="#92400e" opacity="0.6" />\n`;
+            }
+
+            // Length dimension (top)
+            const dimY = py - 5;
+            svg += `  <line x1="${px}" y1="${dimY}" x2="${px + part.sw}" y2="${dimY}" class="dim-line" />\n`;
+            svg += `  <text x="${px + part.sw / 2}" y="${dimY - 2}" text-anchor="middle" class="dim-text">${part.length}mm</text>\n`;
+
+            // Width dimension (right)
+            const dimX = px + part.sw + 5;
+            svg += `  <line x1="${dimX}" y1="${py}" x2="${dimX}" y2="${py + part.sh}" class="dim-line" />\n`;
+            svg += `  <text x="${dimX + 3}" y="${py + part.sh / 2 + 3}" class="dim-text">${part.width}mm</text>\n`;
+
+            // Draw features (joinery, holes, etc.)
+            for (const feat of part.features) {
+              const fx = px + feat.x * scale;
+              const fy = py + feat.y * scale;
+
+              if (feat.type === "hole" && feat.diameter) {
+                const sr = feat.diameter * scale / 2;
+                svg += `  <circle cx="${fx}" cy="${fy}" r="${sr}" class="feature" />\n`;
+                if (feat.label) {
+                  svg += `  <text x="${fx}" y="${fy + sr + 8}" text-anchor="middle" class="feature-label">${feat.label}</text>\n`;
+                }
+              } else {
+                // Rectangular features (dado, rabbet, mortise, chamfer)
+                const fw = (feat.width ?? 10) * scale;
+                const fh = (feat.height ?? 10) * scale;
+                svg += `  <rect x="${fx - fw / 2}" y="${fy - fh / 2}" width="${fw}" height="${fh}" class="feature" />\n`;
+                if (feat.label) {
+                  svg += `  <text x="${fx}" y="${fy + fh / 2 + 8}" text-anchor="middle" class="feature-label">${feat.label}</text>\n`;
+                }
+              }
+            }
+
+            partIdx++;
+          }
+        }
+
+        svg += `</svg>\n`;
+
+        writeFileSync(outputPath, svg, "utf-8");
+        return text(`Schematic SVG saved to ${outputPath} (${parts.length} parts, scale ${scale}:1, ${totalW.toFixed(0)}x${totalH.toFixed(0)}mm)\n\nOpen in a browser or SVG viewer to see the dimensioned parts drawing.`);
+      } catch (e: any) {
+        return err(e.message);
+      }
+    }
+  );
+
+  // ── generate_materials_list ──────────────────────────────
+
+  server.tool(
+    "generate_materials_list",
+    "Generate a complete bill of materials (BOM) for a woodworking project. Includes lumber/sheet goods, hardware (screws, hinges, pulls), edge banding, adhesives, and finishing supplies with estimated costs.",
+    {
+      projectName: z.string().describe("Project name"),
+      lumber: z.array(z.object({
+        material: z.string().describe("Material name (e.g., '3/4 Baltic Birch Plywood', '4/4 Red Oak')"),
+        thickness: z.number().positive().describe("Thickness in mm"),
+        quantity: z.number().positive().describe("Amount needed — board feet for solid, sheets for plywood"),
+        unit: z.enum(["board_feet", "sheets", "linear_feet", "pieces"]).describe("Quantity unit"),
+        unitCost: z.number().min(0).optional().describe("Cost per unit in local currency"),
+      })).default([]).describe("Lumber and sheet goods"),
+      hardware: z.array(z.object({
+        item: z.string().describe("Hardware item name (e.g., '35mm Euro hinges', '#8 x 1-1/4 screws')"),
+        quantity: z.number().positive().describe("Number needed"),
+        unitCost: z.number().min(0).optional().describe("Cost per item"),
+        supplier: z.string().optional().describe("Where to buy"),
+      })).default([]).describe("Hardware items: screws, hinges, pulls, shelf pins, slides, etc."),
+      edgeBanding: z.array(z.object({
+        material: z.string().describe("Edge banding material (e.g., 'White oak iron-on')"),
+        lengthMeters: z.number().positive().describe("Total length needed in meters"),
+        widthMm: z.number().positive().default(22).describe("Banding width in mm"),
+        unitCost: z.number().min(0).optional().describe("Cost per meter"),
+      })).default([]).describe("Edge banding materials"),
+      finishing: z.array(z.object({
+        product: z.string().describe("Finish product name (e.g., 'Arm-R-Seal satin', 'Minwax Provincial stain')"),
+        quantity: z.number().positive().describe("Amount needed"),
+        unit: z.enum(["quarts", "pints", "gallons", "cans", "sheets"]).describe("Quantity unit"),
+        unitCost: z.number().min(0).optional().describe("Cost per unit"),
+      })).default([]).describe("Finishing supplies: stains, sealers, topcoats, sandpaper"),
+      adhesives: z.array(z.object({
+        product: z.string().describe("Adhesive name (e.g., 'Titebond III', 'CA glue')"),
+        quantity: z.number().positive().default(1).describe("Number of bottles/tubes"),
+        unitCost: z.number().min(0).optional().describe("Cost per unit"),
+      })).default([]).describe("Glues and adhesives"),
+      outputPath: z.string().optional().describe("File path to save the materials list (.txt or .csv)"),
+      format: z.enum(["text", "csv"]).default("text").describe("Output format"),
+    },
+    async (params: any) => {
+      try {
+        const { projectName, lumber, hardware, edgeBanding, finishing, adhesives, outputPath, format } = params;
+
+        const calcSubtotal = (items: { unitCost?: number; quantity: number }[]) =>
+          items.reduce((sum, item) => sum + (item.unitCost ?? 0) * item.quantity, 0);
+
+        const lumberCost = calcSubtotal(lumber);
+        const hardwareCost = calcSubtotal(hardware);
+        const bandingCost = edgeBanding.reduce((sum: number, eb: any) => sum + (eb.unitCost ?? 0) * eb.lengthMeters, 0);
+        const finishCost = calcSubtotal(finishing);
+        const adhesiveCost = calcSubtotal(adhesives);
+        const totalCost = lumberCost + hardwareCost + bandingCost + finishCost + adhesiveCost;
+
+        let output: string;
+
+        if (format === "csv") {
+          const lines: string[] = ["Category,Item,Quantity,Unit,Unit Cost,Subtotal"];
+          for (const l of lumber) lines.push(`Lumber,"${l.material}",${l.quantity},${l.unit},${l.unitCost ?? ""},${((l.unitCost ?? 0) * l.quantity).toFixed(2)}`);
+          for (const h of hardware) lines.push(`Hardware,"${h.item}",${h.quantity},pcs,${h.unitCost ?? ""},${((h.unitCost ?? 0) * h.quantity).toFixed(2)}`);
+          for (const eb of edgeBanding) lines.push(`Edge Banding,"${eb.material}",${eb.lengthMeters},meters,${eb.unitCost ?? ""},${((eb.unitCost ?? 0) * eb.lengthMeters).toFixed(2)}`);
+          for (const f of finishing) lines.push(`Finishing,"${f.product}",${f.quantity},${f.unit},${f.unitCost ?? ""},${((f.unitCost ?? 0) * f.quantity).toFixed(2)}`);
+          for (const a of adhesives) lines.push(`Adhesives,"${a.product}",${a.quantity},bottles,${a.unitCost ?? ""},${((a.unitCost ?? 0) * a.quantity).toFixed(2)}`);
+          lines.push(`,,,,TOTAL,${totalCost.toFixed(2)}`);
+          output = lines.join("\n");
+        } else {
+          const lines: string[] = [];
+          lines.push(`MATERIALS LIST: ${projectName}`);
+          lines.push(`${"=".repeat(70)}`);
+          lines.push(`Generated: ${new Date().toISOString().split("T")[0]}`);
+          lines.push("");
+
+          if (lumber.length > 0) {
+            lines.push("LUMBER & SHEET GOODS");
+            lines.push(`${"─".repeat(70)}`);
+            for (const l of lumber) {
+              const cost = l.unitCost ? `$${(l.unitCost * l.quantity).toFixed(2)}` : "";
+              lines.push(`  ${l.material.padEnd(40)} ${String(l.quantity).padStart(5)} ${l.unit.padEnd(12)} ${cost}`);
+            }
+            if (lumberCost > 0) lines.push(`${"".padStart(58)}Subtotal: $${lumberCost.toFixed(2)}`);
+            lines.push("");
+          }
+
+          if (hardware.length > 0) {
+            lines.push("HARDWARE");
+            lines.push(`${"─".repeat(70)}`);
+            for (const h of hardware) {
+              const cost = h.unitCost ? `$${(h.unitCost * h.quantity).toFixed(2)}` : "";
+              const supplier = h.supplier ? ` [${h.supplier}]` : "";
+              lines.push(`  ${h.item.padEnd(40)} ${String(h.quantity).padStart(5)} pcs${" ".repeat(8)} ${cost}${supplier}`);
+            }
+            if (hardwareCost > 0) lines.push(`${"".padStart(58)}Subtotal: $${hardwareCost.toFixed(2)}`);
+            lines.push("");
+          }
+
+          if (edgeBanding.length > 0) {
+            lines.push("EDGE BANDING");
+            lines.push(`${"─".repeat(70)}`);
+            for (const eb of edgeBanding) {
+              const cost = eb.unitCost ? `$${(eb.unitCost * eb.lengthMeters).toFixed(2)}` : "";
+              lines.push(`  ${eb.material.padEnd(40)} ${String(eb.lengthMeters).padStart(5)}m (${eb.widthMm}mm)${" ".repeat(3)} ${cost}`);
+            }
+            if (bandingCost > 0) lines.push(`${"".padStart(58)}Subtotal: $${bandingCost.toFixed(2)}`);
+            lines.push("");
+          }
+
+          if (finishing.length > 0) {
+            lines.push("FINISHING SUPPLIES");
+            lines.push(`${"─".repeat(70)}`);
+            for (const f of finishing) {
+              const cost = f.unitCost ? `$${(f.unitCost * f.quantity).toFixed(2)}` : "";
+              lines.push(`  ${f.product.padEnd(40)} ${String(f.quantity).padStart(5)} ${f.unit.padEnd(12)} ${cost}`);
+            }
+            if (finishCost > 0) lines.push(`${"".padStart(58)}Subtotal: $${finishCost.toFixed(2)}`);
+            lines.push("");
+          }
+
+          if (adhesives.length > 0) {
+            lines.push("ADHESIVES");
+            lines.push(`${"─".repeat(70)}`);
+            for (const a of adhesives) {
+              const cost = a.unitCost ? `$${(a.unitCost * a.quantity).toFixed(2)}` : "";
+              lines.push(`  ${a.product.padEnd(40)} ${String(a.quantity).padStart(5)} bottles${" ".repeat(5)} ${cost}`);
+            }
+            if (adhesiveCost > 0) lines.push(`${"".padStart(58)}Subtotal: $${adhesiveCost.toFixed(2)}`);
+            lines.push("");
+          }
+
+          lines.push(`${"=".repeat(70)}`);
+          if (totalCost > 0) {
+            lines.push(`ESTIMATED TOTAL: $${totalCost.toFixed(2)}`);
+          }
+          lines.push("");
+
+          output = lines.join("\n");
+        }
+
+        if (outputPath) {
+          writeFileSync(outputPath, output, "utf-8");
+          return text(`Materials list saved to ${outputPath}\n\n${output}`);
+        }
+        return text(output);
       } catch (e: any) {
         return err(e.message);
       }
