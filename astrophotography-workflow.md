@@ -1,6 +1,6 @@
 # Astrophotography with Claude Code: Stacking, Star Removal & Meteor Detection
 
-Notes from a series of Claude Code sessions (Aug–Oct 2026) run on a MacBook Pro. Covers:
+Notes from a series of Claude Code sessions (Aug–Oct 2026) run on a MacBook Pro. Every step also runs on Windows; see Prerequisites. Covers:
 
 1. Stacking and finishing Unistellar Odyssey data in **Siril** + **StarNet2**
 2. Finding meteors (vs. planes/satellites) in **Nikon Z8** night-sky sequences
@@ -50,6 +50,10 @@ Outputs per target: final, stars-30%, starless, and star layer, as PNG and 16-bi
 - Siril's `denoise` / `rmgreen` can print a spurious "no suitable data" error that you can safely ignore.
 - Siril and StarNet disagree on FITS row order (the image comes back flipped). Also, PIL can't read 16-bit RGB TIFFs; use `tifffile`.
 - If SPCC's sensor database isn't downloaded, it falls back to a generic sensor response. Download it for best color.
+- **GHS (Generalized Hyperbolic Stretch)** in Siril is a good alternative to autostretch when you want more control over the highlights.
+- **Drift timelapses** (playing the subs in order) are a quick way to check tracking. In one case they showed that the pointing recorded in the frame headers was wrong.
+- **macOS only:** Siril's bundled Python can show crash warnings because macOS kills it. They're harmless.
+- A soft-looking target (e.g. M33) is often caused by low altitude or seeing rather than processing. Check the target's altitude during the capture window.
 
 ---
 
@@ -78,7 +82,18 @@ Results ranged from ~70 to ~120 candidates per night for review. After plane/sat
 - Some card files were truncated or corrupt, so make every step skip unreadable frames instead of crashing.
 - A green cast across the sky was **airglow**, not a lens problem. Checking NOAA's Kp index (quiet, ~1–2) ruled out aurora.
 
-<!-- OCT_SESSION -->
+### October refinements
+Later sessions (October) improved the pipeline:
+- **Fixed a dash-test bug.** Smooth meteors were scoring higher than dashed plane trails, the reverse of what's intended.
+- **Added a refinement pass (`refine.py`)** that labels each streak as one of:
+  - persistent sky features
+  - **satellites** (the line continues across consecutive frames)
+  - **aircraft** (red nav-light color)
+- Added **A/B contact sheets** and denoised thumbnails for faster human review.
+- Added **circled copies** of each meteor frame, so the streak is easy to spot when sharing.
+- Added **stack scripts**:
+  - a meteor composite (all meteors from the night on one image)
+  - a **"stars-only" star-trail timelapse** where planes and satellites fade out like clouds instead of piling up into the trails
 
 ---
 
@@ -89,8 +104,21 @@ Results ranged from ~70 to ~120 candidates per night for review. After plane/sat
 - To keep disk use low (peak ~5.5 GB), convert the raws in batches rather than all at once.
 
 ### Encoding tips (FFmpeg)
-- **Choppy playback wasn't dropped frames, it was bitrate.** At `-crf 16` the sensor grain produced 178–403 Mbps files that players couldn't keep up with.
-- Fix: **spatial-only denoise** + `-crf 20` gave 10–61 Mbps with no visible loss. *Don't* use temporal denoise, because it erases single-frame meteors.
+Choppy or frozen playback had two causes, neither of them dropped frames:
+1. **Bitrate.** At `-crf 16` the sensor grain produced 178–403 Mbps files that players couldn't keep up with. **Spatial-only denoise** plus `-crf 20` brought them down to 10–61 Mbps with no visible loss. *Don't* use temporal denoise, because it erases single-frame meteors.
+2. **H.264 level.** 3840×2560 H.264 requires level 6.0, which Apple's hardware decoder rejects, so the video freezes on Macs and iPhones. **Encode as HEVC instead:**
+
+```bash
+ffmpeg -framerate 24 -i frames/%05d.jpg \
+  -vf "hqdn3d=3:3:0:0" \
+  -c:v libx265 -crf 20 -preset slow -tag:v hvc1 -pix_fmt yuv420p \
+  timelapse_4k.mp4
+```
+
+- `hqdn3d=3:3:0:0` applies spatial denoise only (the temporal values are set to 0).
+- `-tag:v hvc1` is needed for QuickTime and iOS to play the file.
+- **macOS:** check that hardware decode works with `ffmpeg -hwaccel videotoolbox -i timelapse_4k.mp4 -f null -`.
+- **Windows:** HEVC playback in the built-in apps needs Microsoft's *HEVC Video Extensions* from the Microsoft Store. VLC plays it with no add-ons.
 - Accumulated trails are a quick way to check tracking: on a "tracked" night they showed the stars were still trailing.
 
 ---
