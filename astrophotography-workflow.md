@@ -1,112 +1,129 @@
-# Astrophotography with Claude Code: Stacking, Star Removal & Meteor Detection
+# Night-Sky Photo Workflow: Stacking, Star Removal & Meteor Hunting
 
-Notes from a series of Claude Code sessions (Aug–Oct 2026) run on a MacBook Pro. Every step also runs on Windows; see Prerequisites. Covers:
+*A practical guide based on a few months of real sessions (Aug–Oct 2026), using an AI coding assistant (Claude Code) to do the heavy lifting. It was done on a Mac, but everything here works on Windows too.*
 
-1. Stacking and finishing Unistellar Odyssey data in **Siril** + **StarNet2**
-2. Finding meteors (vs. planes/satellites) in **Nikon Z8** night-sky sequences
-3. Making 4K timelapses and star-trail videos from the same frames
+**What this guide covers:**
+1. **Stacking telescope photos.** Hundreds or thousands of short shots are combined into one clean, colorful image of a nebula.
+2. **Removing the stars.** This lets the nebula pop, and you can add the stars back at lower strength.
+3. **Finding meteors.** A program goes through a whole night of camera frames and picks out the ones with a meteor in them, not a plane or satellite.
+4. **Making timelapses and star trails** that play smoothly on phones and laptops.
+
+You don't need to be a programmer. The AI writes and runs the scripts; your job is to say what you want and tell it when the results look wrong.
 
 ---
 
-## Prerequisites
+## Quick glossary
 
-| Tool | Used for | macOS | Windows |
+| Term | What it means |
+|---|---|
+| **Sub / sub-frame** | One single exposure. A finished image is made from many subs. |
+| **Stacking** | Lining up and averaging many subs. Noise cancels out and faint detail builds up. |
+| **Stretching** | Raw stacked images look almost black. Stretching brightens the faint stuff without blowing out the stars. Think of it as an extreme curves adjustment. |
+| **Starless image** | The same photo with the stars digitally removed, so only the nebula is left. |
+| **Plate solving** | The software works out exactly where in the sky the photo points by matching its star pattern. |
+| **Color calibration (SPCC)** | Uses star catalog data to set "true" colors, like a scientifically accurate white balance. |
+| **Bayer pattern** | The layout of red, green and blue pixels on the sensor (RGGB, GBRG, etc.). If the software guesses it wrong, the colors come out wrong. |
+| **Raw files (NEF / DNG)** | Nikon's raw format (NEF) and Adobe's universal raw format (DNG). |
+| **Timelapse** | Thousands of frames played back as a video. |
+| **Bitrate / CRF** | How much data per second a video uses. Higher means bigger files that are harder for devices to play. |
+
+---
+
+## What you'll need (Mac & Windows)
+
+Install these once. Everything here is free.
+
+| App | What it's for | Mac | Windows |
 |---|---|---|---|
-| **Claude Code** | Driving the whole workflow | `npm install -g @anthropic-ai/claude-code` (or the Claude desktop app) | Same `npm` command, or the Claude desktop app |
-| **Siril** (1.2+) | Stacking, plate solving, SPCC color calibration, background extraction, denoise, stretch | `brew install --cask siril` or DMG from [siril.org](https://siril.org/download/) | Installer from [siril.org](https://siril.org/download/) |
-| **StarNet2** | Star removal (starless + star-layer images) | Download the macOS build from [starnetastro.com](https://www.starnetastro.com/) and unzip, e.g. to `~/StarNet2/`. Clear quarantine: `xattr -dr com.apple.quarantine ~/StarNet2` | Download the Windows build from [starnetastro.com](https://www.starnetastro.com/) and unzip, e.g. to `C:\StarNet2\` |
-| **Python 3.12** | Meteor detection pipeline, custom image steps | `brew install python@3.12` (macOS's built-in Python is too old) | `winget install Python.Python.3.12` or [python.org](https://www.python.org/downloads/) |
-| Python packages | Image decoding & analysis | `python3.12 -m venv .venv && source .venv/bin/activate && pip install numpy pandas scipy opencv-python rawpy pillow tifffile` | `py -3.12 -m venv .venv` → `.venv\Scripts\activate` → same `pip install …` |
-| **ExifTool** | Reading capture timestamps, building a frame manifest | `brew install exiftool` | `winget install OliverBetz.ExifTool` or [exiftool.org](https://exiftool.org/) |
-| **FFmpeg** | Timelapse & star-trail video encoding | `brew install ffmpeg` | `winget install Gyan.FFmpeg` or [ffmpeg.org](https://ffmpeg.org/download.html) |
-| **Adobe DNG Converter** *(optional)* | Converting Nikon HE NEF raws for tools that can't read them | [Adobe download page](https://helpx.adobe.com/camera-raw/using/adobe-dng-converter.html) | Same |
+| **Claude Code** | The AI assistant that writes and runs the scripts | Install the **Claude desktop app** from [claude.ai/download](https://claude.ai/download) | Same |
+| **Siril** | Stacking, color calibration, stretching | Download from [siril.org](https://siril.org/download/) | Download from [siril.org](https://siril.org/download/) |
+| **StarNet2** | Star removal | Download the Mac version from [starnetastro.com](https://www.starnetastro.com/) and unzip it into your home folder | Download the Windows version from [starnetastro.com](https://www.starnetastro.com/) and unzip it to `C:\StarNet2` |
+| **Python 3.12** | Runs the meteor-finding scripts | See the Homebrew note below, then run `brew install python@3.12` | Download from [python.org](https://www.python.org/downloads/) and **tick "Add Python to PATH"** during install |
+| **ExifTool** | Reads the capture time from each photo | `brew install exiftool` | Download from [exiftool.org](https://exiftool.org/) |
+| **FFmpeg** | Turns frames into videos | `brew install ffmpeg` | Download from [ffmpeg.org](https://ffmpeg.org/download.html) (the "gyan.dev" builds are easiest) |
+| **Adobe DNG Converter** *(optional)* | Converts raws for apps that can't read them | [Adobe download](https://helpx.adobe.com/camera-raw/using/adobe-dng-converter.html) | Same |
 
-**Register StarNet2 in Siril:** *Preferences → Miscellaneous → StarNet executable* → point to the `starnet2` binary (`starnet2.exe` on Windows). After that, Siril's `starnet` command and the *Image Processing → Star Processing → StarNet* menu both work.
+**Mac users: what's `brew`?** Homebrew is a free tool for installing apps from the Terminal. Install it once from [brew.sh](https://brew.sh) by copying its one-line command into Terminal. After that, every `brew install …` line above just works.
 
-**Disk space:** a single night of Z8 raws can be 50–100 GB. Keep at least 2× the size of the night's raws free while processing.
+**Windows users: shortcut.** If you're comfortable with the command line, `winget install Python.Python.3.12`, `winget install OliverBetz.ExifTool` and `winget install Gyan.FFmpeg` install three of these in one go.
 
----
+**Easy mode:** you can also just ask Claude, *"Install Python 3.12, ExifTool, and FFmpeg for me and set up a folder for the meteor scripts."* It will run the commands and install the Python add-ons (numpy, OpenCV, etc.) itself.
 
-## 1. Stacking Unistellar data in Siril + StarNet2
+**Connect StarNet2 to Siril:** in Siril, open **Preferences → Miscellaneous**, find **StarNet executable**, and point it at the `starnet2` file (`starnet2.exe` on Windows) in the folder you unzipped.
 
-**Targets:** Eastern Veil (NGC 6992, 733 subs) and Crescent Nebula (NGC 6888, 4,605 subs). The goal was better color and detail than the Odyssey's own in-app result.
-
-### Pipeline
-1. **Stack** the raw light frames in Siril.
-2. **Plate solve**, then run **SPCC** (Spectrophotometric Color Calibration) against Gaia DR3.
-3. **Background extraction** to remove gradients.
-4. **Denoise** at half strength (`denoise -mod=0.5`).
-5. **Linked autostretch** (`autostretch -linked`).
-6. **Saturation** boost.
-7. **StarNet2** to split the image into starless and star layers.
-8. **Recombine** with stars reduced (e.g. 30% star layer) for a nebula-forward final.
-
-Outputs per target: final, stars-30%, starless, and star layer, as PNG and 16-bit TIFF. Keep `result_spcc.fit` as the linear master.
-
-### Gotchas
-- **Wrong Bayer pattern in the headers.** The Unistellar light-frame headers say `RGGB`, but the real pattern is **`GBRG`** (probably because two rows are cropped). Override it in Siril or the colors come out wrong.
-- **Always use a linked stretch.** An unlinked autostretch wrecks the color balance that SPCC just fixed.
-- **"Smoky haze" in starless images** came from full-strength denoise plus saturation. Half-strength denoise plus a second background extraction *on the starless image* fixed it and kept more filament detail.
-- Siril's `denoise` / `rmgreen` can print a spurious "no suitable data" error that you can safely ignore.
-- Siril and StarNet disagree on FITS row order (the image comes back flipped). Also, PIL can't read 16-bit RGB TIFFs; use `tifffile`.
-- If SPCC's sensor database isn't downloaded, it falls back to a generic sensor response. Download it for best color.
-- **GHS (Generalized Hyperbolic Stretch)** in Siril is a good alternative to autostretch when you want more control over the highlights.
-- **Drift timelapses** (playing the subs in order) are a quick way to check tracking. In one case they showed that the pointing recorded in the frame headers was wrong.
-- **macOS only:** Siril's bundled Python can show crash warnings because macOS kills it. They're harmless.
-- A soft-looking target (e.g. M33) is often caused by low altitude or seeing rather than processing. Check the target's altitude during the capture window.
+**Storage:** a single night of shooting on a high-res camera can be **50–100 GB**. Have at least twice that free before you start.
 
 ---
 
-## 2. Meteor vs. plane/satellite detection (Nikon Z8)
+## Part 1: Stacking telescope photos (Siril + StarNet2)
 
-**Goal:** From thousands of frames per night, pull out the few that contain a meteor, and reject planes, satellites, clouds, and trees.
+**What we did:** took data from a Unistellar Odyssey smart telescope of the Eastern Veil Nebula (733 subs) and the Crescent Nebula (4,605 subs). We processed it ourselves and got noticeably better color and detail than the telescope's own app.
 
-### Pipeline (Python)
-1. **Manifest + dedupe** with ExifTool. Cards had zero-byte and duplicate files, and a night can roll over into a second folder mid-session, so merge folders by timestamp.
-2. **Decode the embedded full-res JPEG** from each NEF (~66 ms/frame; a whole night in ~11 s on 16 cores).
-3. **Frame differencing + streak detection** with OpenCV.
-4. **Static mask** for the treeline and foreground.
-5. **Shape cuts:** streak **width** is the key separator (meteors have a median width of ~1.6 px; cloud edges are ~24 px). Elongation alone isn't enough.
-6. **Aircraft rejection:** an **autocorrelation "dash" test** catches blinking nav lights. Strobe/color and multi-frame track-linking tests catch planes and satellites that span several frames.
-7. **Twilight gate** to ignore frames at dusk and dawn.
-8. **Recall harness:** inject synthetic meteors to measure recall and the false-positive rate while tuning.
-9. Output ranked candidate JPEGs, **contact sheets**, and an `index.csv` / `detections.csv` with coordinates for manual review.
+### The steps
+1. **Stack** all the subs in Siril.
+2. **Plate solve**, then run **color calibration (SPCC)** for accurate color.
+3. **Remove the background gradient.** This takes out the uneven glow from light pollution or the moon.
+4. **Denoise at half strength.** Full strength makes things look smudgy.
+5. **Stretch** to bring out the faint nebula. Use the *linked* option (see tips).
+6. **Add saturation.**
+7. **Remove the stars with StarNet2.** You get two layers: nebula only, and stars only.
+8. **Blend the stars back in at about 30%.** The nebula becomes the hero and the stars stay subtle.
 
-Results ranged from ~70 to ~120 candidates per night for review. After plane/satellite filtering, the "confident meteor" bucket shrank dramatically (389 → 7 on one night). Because of that, it's worth also exporting a "**all streaked frames**" folder for a human pass.
+**What you end up with for each target:** a final image, a stars-at-30% version, a starless version, and a stars-only layer, saved as PNG (for sharing) and 16-bit TIFF (for editing). Keep the `.fit` file too; it's your untouched master.
 
-### Gotchas
-- **Nikon Z8 "High Efficiency" NEFs can't be decoded by LibRaw/rawpy.** Use the embedded JPEG for detection, and Adobe DNG Converter if you need full raw data.
-- **DNG isn't a free win:** converted DNGs were **1.42× larger** than HE NEFs and lost Picture Control metadata. Keep the NEFs.
-- **Morphological closing made false positives much worse.** Skip it.
-- An FFT-based dash test never triggered; autocorrelation worked.
-- Some card files were truncated or corrupt, so make every step skip unreadable frames instead of crashing.
-- A green cast across the sky was **airglow**, not a lens problem. Checking NOAA's Kp index (quiet, ~1–2) ruled out aurora.
-
-### October refinements
-Later sessions (October) improved the pipeline:
-- **Fixed a dash-test bug.** Smooth meteors were scoring higher than dashed plane trails, the reverse of what's intended.
-- **Added a refinement pass (`refine.py`)** that labels each streak as one of:
-  - persistent sky features
-  - **satellites** (the line continues across consecutive frames)
-  - **aircraft** (red nav-light color)
-- Added **A/B contact sheets** and denoised thumbnails for faster human review.
-- Added **circled copies** of each meteor frame, so the streak is easy to spot when sharing.
-- Added **stack scripts**:
-  - a meteor composite (all meteors from the night on one image)
-  - a **"stars-only" star-trail timelapse** where planes and satellites fade out like clouds instead of piling up into the trails
+### Things that tripped us up
+- **Weird colors?** The Unistellar files claim the color layout is **RGGB**, but it's really **GBRG**. Set it manually in Siril or everything comes out tinted.
+- **Always use a "linked" stretch.** An unlinked stretch brightens each color channel separately, which throws the color balance off again.
+- **Starless image looks hazy or smoky?** Too much denoise plus saturation causes that. Use half-strength denoise and run background removal again on the starless image. That cleared it up and kept more fine detail in the nebula.
+- **Prefer more control?** Siril's **GHS** stretch tool is the advanced way to stretch: it gives you more control over the bright areas than auto-stretch.
+- **Blurry target?** It's usually not your processing. Low targets near the horizon look softer because you're shooting through more atmosphere.
+- **Quick tracking check:** play your subs back in order as a mini timelapse. If the image wanders, your tracking or pointing was off.
+- **Harmless warnings:** Siril may show a "no suitable data" error on denoise, and Python crash warnings on Mac. You can ignore both.
 
 ---
 
-## 3. Timelapses & star trails
+## Part 2: Finding meteors in a night of photos
 
-- **4K (3840×2560) at 24 fps** from the full night's frames, in graded (gamma 1.8) and ungraded versions.
-- **Accumulating star-trail** and **"comet-tail"** trail videos, plus a single full-resolution star-trail composite.
-- To keep disk use low (peak ~5.5 GB), convert the raws in batches rather than all at once.
+**What we did:** shot all night on a **Nikon Z8**, which gives thousands of frames. A script found the few frames with a real meteor and threw out planes, satellites, clouds and trees.
 
-### Encoding tips (FFmpeg)
-Choppy or frozen playback had two causes, neither of them dropped frames:
-1. **Bitrate.** At `-crf 16` the sensor grain produced 178–403 Mbps files that players couldn't keep up with. **Spatial-only denoise** plus `-crf 20` brought them down to 10–61 Mbps with no visible loss. *Don't* use temporal denoise, because it erases single-frame meteors.
-2. **H.264 level.** 3840×2560 H.264 requires level 6.0, which Apple's hardware decoder rejects, so the video freezes on Macs and iPhones. **Encode as HEVC instead:**
+### How the script decides
+1. **Sort the frames by capture time.** It also removes duplicate and empty files that sometimes show up on memory cards.
+2. **Use the preview JPEG built into each raw file.** It's fast: a whole night took about 11 seconds.
+3. **Compare each frame with the ones next to it** to find new streaks of light.
+4. **Ignore the foreground** (trees, horizon) using a mask.
+5. **Check how thin each streak is.** Meteors are razor thin, about 1–2 pixels; cloud edges are fat, about 24 pixels. This turned out to be the best single test.
+6. **Weed out planes and satellites:**
+   - **Planes** have blinking lights, so their trail looks dashed and often has red in it.
+   - **Satellites** show up in several frames in a row along the same line.
+   - **Meteors** are a single smooth streak in a single frame.
+7. **Skip twilight frames** at dusk and dawn.
+8. **Make contact sheets** (grids of thumbnails) and a spreadsheet of candidates, so you can check them by eye quickly.
+9. **Make circled copies** of the meteor frames, so the streak is easy to spot when you share them.
+
+### Things that tripped us up
+- **Nikon "High Efficiency" raw files** can't be opened by a lot of free software. The built-in preview JPEG works great for detection.
+- **Converting to DNG isn't worth it** for these files. The DNGs came out 42% *bigger* and lost Nikon's Picture Control settings. Keep the original NEFs.
+- **The script will miss some meteors.** Once the plane filters were strict, the "definitely a meteor" pile shrank from 389 to 7 on one night. Always ask for an **"all streaks" folder** too and look through it yourself.
+- **Damaged files happen.** A few frames on the card were corrupted. Make sure the script skips bad files instead of crashing.
+- **Green sky?** That's probably **airglow**, a natural glow in the upper atmosphere. It's not your lens, and it's not aurora unless the space-weather (Kp) index is high.
+
+---
+
+## Part 3: Timelapses & star trails
+
+**What we made:**
+- A 4K timelapse of the whole night at 24 fps, in an edited version and a natural version.
+- Star-trail videos where the trails build up over time, plus a "comet-tail" version where the trails fade behind the stars.
+- A single star-trail photo combining the whole night.
+- A **stars-only** star-trail video where planes and satellites fade out instead of cluttering the trails.
+
+### Why our first videos stuttered and froze (and the fix)
+There were two problems:
+
+1. **The files were way too heavy.** Sensor grain makes video files huge: ours were 178–403 Mbps, more than devices could keep up with. A light noise reduction and slightly more compression brought them down to 10–61 Mbps with no visible difference.
+2. **The wrong video format for the resolution.** At this resolution, the common H.264 format won't play on Macs, iPhones or iPads. Switching to **HEVC (H.265)** fixed it.
+
+Here's the FFmpeg command that worked. You can also just ask Claude to "make a 4K HEVC timelapse from this folder":
 
 ```bash
 ffmpeg -framerate 24 -i frames/%05d.jpg \
@@ -115,17 +132,19 @@ ffmpeg -framerate 24 -i frames/%05d.jpg \
   timelapse_4k.mp4
 ```
 
-- `hqdn3d=3:3:0:0` applies spatial denoise only (the temporal values are set to 0).
-- `-tag:v hvc1` is needed for QuickTime and iOS to play the file.
-- **macOS:** check that hardware decode works with `ffmpeg -hwaccel videotoolbox -i timelapse_4k.mp4 -f null -`.
-- **Windows:** HEVC playback in the built-in apps needs Microsoft's *HEVC Video Extensions* from the Microsoft Store. VLC plays it with no add-ons.
-- Accumulated trails are a quick way to check tracking: on a "tracked" night they showed the stars were still trailing.
+- `hqdn3d=3:3:0:0` is a light noise reduction that works **within** each frame only. Don't use noise reduction that blends frames together, because it erases meteors (they only appear in one frame).
+- `-crf 20` sets the quality. Lower numbers mean higher quality and bigger files.
+- `-tag:v hvc1` makes the video play on Apple devices.
+- **Windows:** to play HEVC in the built-in Photos/Movies apps, install **HEVC Video Extensions** from the Microsoft Store, or just use **VLC** (free).
+
+**Bonus tip:** a star-trail video is also a great way to check whether your tracking mount actually tracked.
 
 ---
 
-## Lessons for working with Claude Code on this
+## Tips for working with an AI assistant on this
 
-- Give Claude a written spec (e.g. a `PIPELINE.md`) for multi-step processing. It follows it and keeps notes.
-- Ask for **contact sheets** and CSVs, which are much faster to review than individual frames.
-- Push back when results look wrong ("you're missing meteors," "this looks hazy"). Each correction above came from that.
-- For viewing results on a phone, Claude can publish a private web page with before/after toggles (iOS Safari blocks `data:` downloads, so use the Web Share API for saving).
+- **Write down what you want first.** A short notes file ("find meteors, ignore planes, give me contact sheets") keeps things on track across sessions.
+- **Ask for things you can look at:** contact sheets, before/after pairs, a spreadsheet of results. That's much faster than opening files one by one.
+- **Push back when something looks off.** "You're missing meteors," "this looks hazy" and "the video stutters" each led to one of the fixes above.
+- **Ask it to explain.** If a step or setting doesn't make sense, ask "why?" It's a good way to learn the processing as you go.
+- **Want to look at results on your phone?** Ask for a simple web page with before/after toggles.
