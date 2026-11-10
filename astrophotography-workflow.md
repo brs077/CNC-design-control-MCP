@@ -3,6 +3,7 @@
 *A practical guide to processing astrophotos with free tools and an AI assistant (Claude Code) doing the heavy lifting. Works on Mac and Windows.*
 
 **What this guide covers:**
+
 1. **Stacking deep-sky photos.** Combine many short shots into one clean, colorful image, including data from **Unistellar** smart telescopes.
 2. **Removing the stars.** This makes the nebula or galaxy stand out; you can add the stars back at lower strength.
 3. **Finding meteors.** Go through a whole night of camera frames automatically and keep only the frames with a meteor, not a plane or satellite.
@@ -62,6 +63,7 @@ Everything here is free.
 This works for any camera or telescope: DSLR/mirrorless on a tracker, a dedicated astro camera, or a smart telescope.
 
 ### The basic steps
+
 1. **Load your subs** into Siril and convert them to a sequence.
 2. **Register** them so the stars line up.
 3. **Stack** with outlier rejection. This automatically removes satellite trails, plane trails and hot pixels that show up in only a few subs.
@@ -77,6 +79,7 @@ This works for any camera or telescope: DSLR/mirrorless on a tracker, a dedicate
 **Save:** a PNG or JPEG for sharing, a **16-bit TIFF** for editing in Photoshop or Lightroom, and the stacked **`.fit`** file as your untouched master.
 
 ### Tips and common problems
+
 - **Always use a "linked" stretch.** An unlinked stretch brightens each color channel separately, which throws the color balance off.
 - **Hazy or smoky starless image?** It's usually too much denoise plus saturation. Denoise less, and run background removal again *on the starless image*.
 - **Want more control than auto-stretch?** Try Siril's **GHS** (Generalized Hyperbolic Stretch) tool.
@@ -95,6 +98,7 @@ Unistellar telescopes (eVscope, Odyssey, etc.) stack automatically in the app. I
 Unistellar raw frames are **FITS** files (`.fits` / `.fit`), one per sub. A single target is usually hundreds to thousands of small files. Put each target's frames in its own folder before you start.
 
 ### Unistellar-specific steps in Siril
+
 1. **Check the color (Bayer) pattern before anything else.** The pattern in Unistellar file headers can be wrong. Odyssey frames, for example, are labeled **RGGB** but are really **GBRG**. If your first test stack looks strangely tinted (green/magenta or swapped colors), go to Siril's debayer settings, tick the option to **ignore the header pattern**, and try **GBRG**.
 2. **Debayer and register** with rotation allowed. Unistellar uses an up/down–left/right mount, so the field rotates during the session. Siril's normal star-alignment handles this.
 3. **Stack with rejection.** Unistellar sessions often have hundreds of subs, so rejection does a great job of removing satellite trails.
@@ -102,6 +106,7 @@ Unistellar raw frames are **FITS** files (`.fits` / `.fit`), one per sub. A sing
 5. **Continue with steps 5–11 above:** plate solve, color calibration, background removal, stretch, star removal.
 
 ### Unistellar tips
+
 - **Throw out bad frames.** Frames hit by clouds, wind gusts or a bump will be blurry or faint. Siril can sort frames by quality after registration, so drop the worst ones.
 - **Don't trust the pointing info in the headers too much.** If plate solving fails, solve using the target's name or coordinates instead of the position stored in the file.
 - **Long sessions are worth it.** Unistellar subs are short, so a few thousand of them gives a much cleaner result than a few hundred.
@@ -114,6 +119,7 @@ Unistellar raw frames are **FITS** files (`.fits` / `.fit`), one per sub. A sing
 If you leave a camera shooting all night during a meteor shower, you can end up with thousands of frames. A script can find the few with a meteor and throw out planes, satellites, clouds and trees. Ask Claude to build one using the approach below.
 
 ### How a meteor finder works
+
 1. **Sort the frames by capture time** using ExifTool, and remove duplicate or empty files (memory cards sometimes have them).
 2. **Use the preview JPEG built into each raw file.** It's much faster than decoding the full raw, and plenty for detection.
 3. **Compare each frame with the ones next to it** to find new streaks of light.
@@ -128,6 +134,7 @@ If you leave a camera shooting all night during a meteor shower, you can end up 
 9. **Make circled copies** of the meteor frames, so the streak is easy to spot when you share them.
 
 ### Tips and common problems
+
 - **Some newer raw formats** (like Nikon's "High Efficiency" NEF) can't be opened by much free software. The built-in preview JPEG works fine for detection.
 - **Converting to DNG isn't always a win.** For compressed raw formats, DNGs can come out *larger* and lose camera-specific settings. Keep your originals.
 - **No automatic filter is perfect.** Strict plane filters will also throw out some real meteors. Also ask for an **"all streaks" folder** and give it a quick look yourself.
@@ -140,6 +147,7 @@ If you leave a camera shooting all night during a meteor shower, you can end up 
 ## Part 3: Timelapses & star trails
 
 From the same night of frames you can make:
+
 - a **timelapse** of the whole night (4K at 24 fps looks great)
 - **star-trail videos** where trails build up over time, or a "comet-tail" version where they fade behind each star
 - a single **star-trail photo** combining the whole night
@@ -167,6 +175,7 @@ ffmpeg -framerate 24 -i frames/%05d.jpg \
 - **Windows:** to play HEVC in the built-in Photos/Movies apps, install **HEVC Video Extensions** from the Microsoft Store, or just use **VLC** (free).
 
 **Tips:**
+
 - **Make one version with your edit** (contrast, gamma) and **one natural version**, then pick the better one.
 - **A star-trail video doubles as a tracking check.** On a tracked shot, the stars shouldn't trail.
 - **Save disk space** by converting raws in batches instead of all at once.
