@@ -91,9 +91,8 @@ This works for any camera or telescope: DSLR/mirrorless on a tracker, a dedicate
 
 Unistellar telescopes (eVscope, Odyssey, etc.) stack automatically in the app. If you stack the **individual raw frames** yourself in Siril, you can usually get noticeably better color, less noise and more detail.
 
-### Getting the raw frames
-- Unistellar can save the individual frames of an observation as **FITS** files. Look in the Unistellar app for the option to download or export raw data. Where it lives depends on your app version and telescope, so check Unistellar's support pages if you can't find it.
-- Copy the whole folder for one target to your computer. Expect hundreds to thousands of small FITS files per target.
+### The raw files
+Unistellar raw frames are **FITS** files (`.fits` / `.fit`), one per sub. A single target is usually hundreds to thousands of small files. Put each target's frames in its own folder before you start.
 
 ### Unistellar-specific steps in Siril
 1. **Check the color (Bayer) pattern before anything else.** The pattern in Unistellar file headers can be wrong. Odyssey frames, for example, are labeled **RGGB** but are really **GBRG**. If your first test stack looks strangely tinted (green/magenta or swapped colors), go to Siril's debayer settings, tick the option to **ignore the header pattern**, and try **GBRG**.
